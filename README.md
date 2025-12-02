@@ -228,8 +228,8 @@ df_final = df_exploded.select(
 df_final = df_final.filter(col("time").isNotNull())
 df_final = df_final.filter((col("temperature") > -60) & (col("temperature") < 60))
 df_final = df_final.filter(col("relative_humidity").isNotNull())
-
-df_final.show()
+df_final = df_final.drop(col("latitud")).drop(col("longitud")).drop(col("year"))
+df_final = df_final.withColumn("id_location", lit("01")).show()
 
 DB_PROPERTIES = {
     "driver": "org.postgresql.Driver"
@@ -246,11 +246,11 @@ df_final.write \
 
 ### B. Final Data Warehouse Load
 
-The clean, final DataFrame is written to the PostgreSQL Data Warehouse using the **JDBC connector**, ensuring proper schema mapping and reliable bulk transfer.
+The clean, final DataFrame is written to the PostgreSQL Data Warehouse fact table using the **JDBC connector**, ensuring proper schema mapping and reliable bulk transfer.
 
 **PostgreSQL Table Head:**
 
-![Data warehouse](assets/postgresql.png)
+![Data warehouse](assets/warehouse.png)
 
 **Why I chose PostgreSQL**
 
