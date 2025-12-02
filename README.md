@@ -1,82 +1,134 @@
-# 🌬️ Patagonia Climate Data Pipeline: End-to-End ETL 1975–2025
+# Patagonia Climate Data Pipeline: End-to-End ETL 1975–2025
 
 **My Flagship Data Engineering Project**
 
-My primary goal was to design and build a scalable, reproducible ELT (Extract, Load, Transform) pipeline to ingest 50 years of hourly meteorological data for the Río Grande region (Tierra del Fuego). This project showcases the complete data lifecycle, from a third-party API to the final BI layer.
+My primary goal was to design and build a scalable, reproducible ETL (Extract, Transform, Load) pipeline to ingest 50 years of hourly meteorological data for the Río Grande region (Tierra del Fuego). This project showcases the complete data lifecycle, from a third-party API to the final BI layer.
 
-## ⚙️ 1. Core Technologies
+## 1. Project Stack
 
-| Category | Tool | Function in the Project |
-| :--- | :--- | :--- |
-| **Orchestration** | **Apache Airflow** | Managing historical backfills and ensuring daily incremental execution. |
-| **Staging / Data Lake** | Open-Meteo API, **AWS S3** | Data ingestion and raw data persistence using cloud object storage. |
-| **Processing** | **PySpark** | Distributed transformation, flattening nested JSON arrays, and type casting. |
-| **Data Warehouse** | PostgreSQL (Docker) | Final, clean, and queryable analytical storage layer (OLAP). |
-| **Visualization** | **Metabase** | BI layer used for quality assurance and data consumption. |
-| **Environment** | **Docker / Docker Compose** | Guaranteeing 100% project reproducibility across environments. |
+![Open-Meteo API → Airflow → AWS S3 → Spark → PostgreSQL → Metabase](assets/stack.png)
+
+
+
+
+## 2. Infrastructure and Reproducibility
+
+The project runs on a local containerized setup using Airflow, PostgreSQL, Spark (local mode), and Metabase. Below is a structural excerpt of the docker-compose.yml, enough to show the service layout without providing an executable environment.
+
+``` text
+# docker-compose.yml (excerpt)
+version: "3.9"
+
+services:
+  airflow-webserver:
+    image: apache/airflow:3.1.3
+    command: webserver
+    ...
+
+  airflow-scheduler:
+    image: apache/airflow:3.1.3
+    command: scheduler
+    ...
+
+  postgres:
+    image: postgres:16
+    ...
+
+  spark:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    ...
+
+  metabase:
+    image: metabase/metabase
+    ...
+
+```
+
 
 ***
 
-## 🐳 2. Infrastructure and Reproducibility
-
-The entire data platform—including the Airflow scheduler, Spark runtime, and PostgreSQL warehouse—is defined via a single Docker Compose configuration, ensuring the environment is stable and portable.
-
-
-
-### Proof of Containerized Environment
-
-This view confirms that all necessary services are running, interconnected via Docker's internal network, and ready for execution.
-
-![Docker Desktop with services running](assets/services.png)
-
-
-***
-
-## 📥 3. Ingestion and Data Lake Strategy
+## 3. Ingestion and Data Lake Strategy
 
 ### A. Airflow: Backfilling and Idempotency
 
-I utilized Airflow to manage the massive historical backfill starting from 1975. The DAG is intentionally designed to be **idempotent**, allowing for safe retries without duplicating data in the staging area.
+I utilized Airflow to manage the full historical backfill starting from 1975. The DAG is intentionally designed to be **idempotent**, allowing for safe retries without duplicating data in the staging area.
 
 **Airflow DAG Snippet (Backfill Configuration):**
 
 ```python
+from airflow import DAG
+from airflow.operators.python import PythonOperator
 import requests
 import boto3
+import botocore
 from botocore.exceptions import NoCredentialsError, ClientError
+from datetime import datetime, timedelta
+import pendulum
 
 BUCKET_NAME = "datariogrande"
 LAT = -53.776
 LON = -67.703
 URL = "https://archive-api.open-meteo.com/v1/archive"
 
-def ingest_year_to_s3(year):
-    S3_KEY = f"raw/weather/year={year}/riogrande_{year}.json"
+def file_exists(bucket, key):
+    s3 = boto3.client("s3")
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except botocore.exceptions.ClientError:
+        return False
+    
+
+def ingest_year_to_s3(**context):
+    date = context['data_interval_start']
+    year = date.year    
     s3 = boto3.client('s3')
+    S3_KEY = f"raw/weather/year={year}/riogrande_{year}.json"
+    today = datetime.now().date()
+
+    if year == today.year:
+        end_date_obj = today - timedelta(days=1)
+        end_date_str = end_date_obj.strftime('%Y-%m-%d')
+        print(f"Current year detected. Setting end_date to: {end_date_str}")
+    else:
+        end_date_str = f"{year}-12-31"
     params = {
         "latitude": LAT,
         "longitude": LON,
         "start_date": f"{year}-01-01",
-        "end_date": f"{year}-12-31",
+        "end_date": end_date_str,
         "hourly": "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
         "timezone": "America/Argentina/Ushuaia"
     }
-    print(f"Connecting to Open-Meteo API")
-    
     try:
         with requests.get(URL, params=params, stream=True) as response:
             response.raise_for_status() # Stop if error
             response.raw.decode_content = True # Decode GZIP on the fly
-            print(f"Uploading response to S3 bucket")
+            if file_exists(BUCKET_NAME, S3_KEY):
+                return "skip"
             s3.upload_fileobj(response.raw, BUCKET_NAME, S3_KEY) 
             
-        print(f"JSON file successfully uploaded to: s3://{BUCKET_NAME}/{S3_KEY}")
 
     except Exception as e:
         print(f"❌ Error: {e}")
-        raise(e)
+        raise e
+
+with DAG(
+    dag_id='dag_ingest_to_s3',
+    start_date=pendulum.datetime(1975, 1, 1, tz="UTC"),
+    schedule='@yearly',
+    catchup=True,
+    max_active_runs=1
+) as dag:
+
+    ingest_task = PythonOperator(
+        task_id='ingest_to_s3',
+        python_callable=ingest_year_to_s3
+    )
 
 ```
+
+Note: I handle the load **incrementally**. Each batch only inserts the records for its corresponding year using mode("append"), and the warehouse table has a primary key on (time, latitude, longitude). This guarantees that if the pipeline runs again, existing rows are rejected by the database and no duplicates are created. On the ingestion side, Airflow checks whether the yearly JSON file already exists in S3 before uploading it. Together, this gives me practical idempotency without extra tables, state tracking, or complex merge logic.
 
 
 **Airflow UI Execution Proof:**
@@ -84,11 +136,15 @@ This visual confirms the successful completion of the entire 50-year history loa
 
 ![Airflow tasks](assets/airflow.png)
 
-### B. S3 Staging and Hive Partitioning
+**Why I chose Airflow**
 
-Raw JSON files were streamed directly to S3 and organized using the **Hive Partitioning** convention. This decision is fundamental for read performance optimization.
+Airflow was chosen to demonstrate orchestration capabilities, providing built-in features for dependency management, state visibility, execution logging, and crucial retry mechanisms for external API calls, which are features a simple OS Cron scheduler cannot provide.
 
-**S3 Data Lake Structure:**
+### B. AWS S3 Staging and Hive Partitioning
+
+Raw JSON files were streamed directly to AWS S3 and organized using the **Hive Partitioning** convention. This decision was made in order to optimize performance.
+
+**AWS S3 Data Lake Structure:**
 
 ```text
 s3://datariogrande/
@@ -109,13 +165,17 @@ s3://datariogrande/
 
 ***
 
-## ✨ 4. Distributed Transformation (PySpark)
+## 4. Spark-based batch transformation
 
 This stage addresses the core engineering challenge: transforming the columnar JSON arrays into a normalized, row-oriented table format suitable for SQL analytics.
 
 ### A. The Core Logic: Flattening Parallel Arrays
 
 The solution utilizes native Spark functions (`arrays_zip` and `explode`) to convert the nested columnar data into discrete rows, ensuring that the Timestamp and corresponding metrics are correctly aligned in parallel.
+
+**Why I chose Spark**
+
+The dataset doesn’t require distributed processing. I use Spark deliberately to demonstrate that I can structure transformations with its API and execution model. The job runs in local mode and I’m not assuming a cluster deployment. My goal here is to express the logic cleanly and reproducibly, not to claim horizontal scale where it isn’t needed.
 
 **PySpark Transformation Snippet:**
 
@@ -150,15 +210,12 @@ df_zipped = df_raw.withColumn("zipped_metrics",
 ).drop("hourly")
 
 df_exploded = df_zipped.withColumn("data", explode("zipped_metrics"))
+
 df_final = df_exploded.select(
-    # Dimensiones estáticas
     col("latitude").alias("latitud").cast(FloatType()),
     col("longitude").alias("longitud").cast(FloatType()),
-    col("year").cast(IntegerType()), # Columna de la partición de Hive
-    
-    # Hechos (Accedemos a los campos con el nombre original de la API)
-    # Ejemplo: 'data' (el struct explotado) contiene el campo 'time'
-    to_timestamp(col("data.time")).alias("time"), 
+    col("year").cast(IntegerType()),
+    to_timestamp(col("data.time")).alias("time"),
     
     col("data.temperature_2m").alias("temperature").cast(FloatType()),
     col("data.relative_humidity_2m").alias("relative_humidity").cast(FloatType()),
@@ -166,8 +223,12 @@ df_final = df_exploded.select(
     col("data.wind_speed_10m").alias("wind_speed").cast(FloatType()),
     col("data.wind_direction_10m").alias("wind_direction").cast(IntegerType()),
     col("data.wind_gusts_10m").alias("wind_gusts").cast(FloatType())
-    
-).filter(col("time").isNotNull())
+)
+
+df_final = df_final.filter(col("time").isNotNull())
+df_final = df_final.filter((col("temperature") > -60) & (col("temperature") < 60))
+df_final = df_final.filter(col("relative_humidity").isNotNull())
+
 df_final.show()
 
 DB_PROPERTIES = {
@@ -178,7 +239,7 @@ JDBC_URL = "jdbc:postgresql://data_warehouse:5432/clima_db"
 TABLE = "weather_data"
 
 df_final.write \
-    .mode("overwrite") \
+    .mode("append") \
     .jdbc(JDBC_URL, TABLE, properties=DB_PROPERTIES)
 ```
 
@@ -191,9 +252,15 @@ The clean, final DataFrame is written to the PostgreSQL Data Warehouse using the
 
 ![Data warehouse](assets/postgresql.png)
 
+**Why I chose PostgreSQL**
+
+The current data volume ($\sim 438\text{K}$ rows) is small, allowing PostgreSQL to serve as an efficient, self-contained Data Mart within the Docker environment, simplifying setup and avoiding the unnecessary cost and management overhead of distributed cloud warehouses like Redshift or Snowflake.
+
+
+
 ***
 
-## 📊 5. Data Consumption & Validation
+## 5. Data Consumption & Validation
 
 The project concludes by validating the data's quality and accessibility through a standard BI tool.
 
