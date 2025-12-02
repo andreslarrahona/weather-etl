@@ -6,7 +6,9 @@ My primary goal was to design and build a scalable, reproducible ETL (Extract, T
 
 ## 1. Project Stack
 
-Open-Meteo API → Airflow → AWS S3 → Spark → PostgreSQL → Metabase
+![Open-Meteo API → Airflow → AWS S3 → Spark → PostgreSQL → Metabase](assets/stack.png)
+
+
 
 
 ## 2. Infrastructure and Reproducibility
