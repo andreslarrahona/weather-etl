@@ -24,6 +24,11 @@
   | **Transformación** | Python / Apache Spark | AWS EC2 / Python / Pandas |
   | **Data Warehouse** | PostgreSQL (Local) |AWS RDS / PostgreSQL |
 
+### Model 1
+![Model 1](assets/model1.png)
+
+### Model 2
+![Model 2](assets/model2.png)
 
   ---
 
@@ -82,7 +87,7 @@
   <br>
 
   <details open>
-  <summary style="cursor:pointer"><strong>Staging area en AWS S3 </strong></summary>
+  <summary style="cursor:pointer"><strong>Staging area en MinIO (misma estructura en AWS S3 del Modelo 2)</strong></summary>
 
   ```text
   s3://datariogrande/
@@ -467,6 +472,14 @@ The project tackled the same challenge (ingesting and cleaning historical data) 
   | **Transformation** | Python / Apache Spark | AWS EC2 / Python / Pandas |
   | **Data Warehouse** | PostgreSQL (Local) |AWS RDS / PostgreSQL |
 
+### Modelo 1
+![Model 1](assets/model1.png)
+
+### Modelo 2
+![Model 2](assets/model2.png)
+
+  ---
+
 ---
 
 ## Model 1: Local Container-Based Pipeline
@@ -524,7 +537,7 @@ This view shows a successful full load of the 50-year dataset and confirms that 
   <br>
 
   <details open>
-  <summary style="cursor:pointer"><strong>Staging area in AWS S3 </strong></summary>
+  <summary style="cursor:pointer"><strong>Staging area in MinIO (same as AWS S3 in Model 2) </strong></summary>
 
   ```text
   s3://datariogrande/
