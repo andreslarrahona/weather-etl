@@ -4,7 +4,7 @@
   <summary style="cursor:pointer"><strong>Versión en español:</strong>
   </summary>
   
-  # Decisiones de Arquitectura ETL: Cloud-Native vs. Contenedores locales
+  # Proyecto de Arquitectura ETL: Comparación Cloud-Native vs. Contenedores locales
 
 
   **Objetivo del proyecto:** Diseñar, construir y evaluar dos soluciones ETL completas para procesar 50 años de datos meteorológicos por hora, comparando un entorno local con contenedores (control total) y una arquitectura serverless en la nube (AWS, máxima escala).
@@ -24,10 +24,10 @@
   | **Transformación** | Python / Apache Spark | AWS EC2 / Python / Pandas |
   | **Data Warehouse** | PostgreSQL (Local) |AWS RDS / PostgreSQL |
 
-### Model 1
+### Modelo 1
 ![Model 1](assets/model1.png)
 
-### Model 2
+### Modelo 2
 ![Model 2](assets/model2.png)
 
   ---
@@ -90,7 +90,7 @@
   <summary style="cursor:pointer"><strong>Staging area en MinIO (misma estructura en AWS S3 del Modelo 2)</strong></summary>
 
   ```text
-  s3://datariogrande/
+  minio://datariogrande/
   └── raw_cloud/
       └── weather/
           ├── year=1975/
@@ -140,6 +140,11 @@
       .config("spark.hadoop.fs.s3a.aws.credentials.provider",
               "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
       .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
+      .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT) \
+      .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY) \
+      .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY) \
+      .config("spark.hadoop.fs.s3a.path.style.access", "true")  \
+      .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")  \
       .getOrCreate()
 
   path = "s3a://datariogrande/raw/weather/" 
