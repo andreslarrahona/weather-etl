@@ -447,7 +447,21 @@
   | **Mantenimiento** | Alto (requiere aplicar parches al SO, gestionar la VM/EKS) | Bajo (AWS gestiona SO y *patching* por mí) | El **Modelo 2** reduce significativamente las tareas de mantenimiento, ya que la infraestructura y el sistema operativo quedan a cargo de AWS. En contraste, el **Modelo 1** demanda tiempo y atención para mantener el entorno actualizado y operativo. |
   | **Flexibilidad/Control** | Máximo (control sobre cada dependencia) | Limitado (depende de la configuración de AWS) | El **Modelo 1** ofrece mayor control y es útil para probar, ajustar o entender el pipeline en detalle. El **Modelo 2** reduce la carga operativa y simplifica la ejecución en producción, aun con algunas limitaciones propias del entorno cloud. |
 
+  ## Roadmap Futuro y Mejoras Operativas
 
+Aunque este proyecto demuestra una arquitectura ETL comparativa funcional, soy consciente de que un entorno de nivel productivo requiere capas adicionales de robustez. A continuación, detallo algunas de las áreas que entiendo podrían beneficiarse para los siguientes pasos:
+
+### 1. Gestión de Secretos y Seguridad
+Actualmente, las credenciales y cadenas de conexión se gestionan mediante variables de entorno para asegurar cierta simpleza en esta demostración. Para un despliegue real, mi primer paso sería integrar un servicio dedicado como **AWS Secrets Manager**. Esto eliminaría las credenciales expuestas en el código y permitiría la rotación automática de contraseñas, reduciendo significativamente los riesgos de seguridad.
+
+### 2. Validación y Calidad de Datos (Data Quality)
+El pipeline asume que la API de origen es siempre consistente. Para que esto sea "production-ready", implementaría una capa de validación (usando herramientas como **Great Expectations** o esquemas de validación estrictos). Esto me permitiría detectar anomalías (como valores de humedad negativos o marcas de tiempo faltantes) antes de que lleguen al Data Warehouse, asegurando que en la capa analítica haya siempre una "Fuente Única de Verdad".
+
+### 3. Monitoreo y Notificaciones de Fallas
+En cuanto a observabilidad operativa, integraría alertas automatizadas para notificar al equipo en caso de fallos en los jobs. En **Airflow**, esto implicaría configurar `on_failure_callback` para enviar notificaciones a Slack o correo electrónico. En el **modelo Serverless**, utilizaría **Amazon SNS** (Simple Notification Service) disparado por fallas en Step Functions para garantizar tiempos de respuesta inmediatos.
+
+### 4. Infraestructura como Código (IaC)
+Para asegurar que el proyecto sea verdaderamente escalable y repetible en diferentes regiones, reemplazaría la configuración manual de la consola de AWS por **Terraform** o **AWS CDK**. Gestionar la infraestructura como código me permitiría versionar mis recursos y desplegar el modelo Cloud-Native completo con un solo comando, eliminando el error humano durante la configuración.
 
 </details>
 
@@ -477,10 +491,10 @@ The project tackled the same challenge (ingesting and cleaning historical data) 
   | **Transformation** | Python / Apache Spark | AWS EC2 / Python / Pandas |
   | **Data Warehouse** | PostgreSQL (Local) |AWS RDS / PostgreSQL |
 
-### Modelo 1
+### Model 1
 ![Model 1](assets/model1.png)
 
-### Modelo 2
+### Model 2
 ![Model 2](assets/model2.png)
 
   ---
@@ -545,7 +559,7 @@ This view shows a successful full load of the 50-year dataset and confirms that 
   <summary style="cursor:pointer"><strong>Staging area in MinIO (same as AWS S3 in Model 2) </strong></summary>
 
   ```text
-  s3://datariogrande/
+  minio://datariogrande/
   └── raw_cloud/
       └── weather/
           ├── year=1975/
@@ -594,6 +608,11 @@ I went with Spark to apply **distributed processing**, even though it's running 
       .config("spark.hadoop.fs.s3a.aws.credentials.provider",
               "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
       .config("spark.hadoop.fs.s3a.endpoint", "s3.amazonaws.com") \
+      .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT) \
+      .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY) \
+      .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY) \
+      .config("spark.hadoop.fs.s3a.path.style.access", "true")  \
+      .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")  \
       .getOrCreate()
 
   path = "s3a://datariogrande/raw/weather/" 
@@ -844,7 +863,7 @@ In the serverless setup, I went with Pandas because, for this data volume, a man
       data = json.load(obj["Body"])
       h = data.get("hourly",{})
       
-      # Transformación de datos (simplificada, se omiten validaciones y columnas extra) [...]
+      # Data transformations (simplified, validations and extra columns omitted) [...]
       df = pd.DataFrame({
           "time": pd.to_datetime(h["time"], errors="coerce"),
           "temperature": h["temperature_2m"],
@@ -895,6 +914,23 @@ In the serverless setup, I went with Pandas because, for this data volume, a man
 | **Maintenance**            | High (patching OS, managing VM/EKS yourself)       | Low (AWS handles OS and patching)                    | **Model 2** significantly reduces maintenance effort, as AWS takes care of the infrastructure and OS. In contrast, **Model 1** requires time and attention to keep everything updated and running smoothly. |
 | **Flexibility/Control**    | Maximum (full control over every dependency)        | Limited (tied to AWS configurations)                 | **Model 1** gives you the most control, making it great for testing, tweaking, or deeply understanding the pipeline. **Model 2** lightens the operational burden and simplifies production runs, even with some cloud-specific limitations. |
 
+
+## Future Roadmap & Operational Improvements
+
+  While this project demonstrates a functional comparative ETL architecture, I am aware that a production-grade environment requires additional layers of robustness. Below are the key areas I've identified for the next iteration of this pipeline:
+
+  ### 1. Security & Secret Management
+  Currently, credentials and connection strings are managed via environment variables for simplicity in this local demonstration. For a real-world deployment, my first step would be integrating a dedicated service like **AWS Secrets Manager**. This would eliminate hardcoded credentials and allow for automated password rotation, significantly reducing security risks.
+
+  ### 2. Data Validation & Quality Assurance
+  The pipeline assumes the source API is consistent. To make this production-ready, I would implement a validation layer (using tools like **Great Expectations** or simple schema enforcement). This would catch anomalies—such as negative humidity values or missing timestamps—before they reach the Data Warehouse, ensuring that the BI layer remains a "Single Source of Truth."
+
+  ### 3. Monitoring & Failure Notifications
+  For operational observability, I would integrate automated alerts to notify the team in case of job failures. In **Airflow**, this involves configuring `on_failure_callback` to send Slack or email notifications. In the **Serverless model**, I would leverage **Amazon SNS** (Simple Notification Service) triggered by Step Function failures to ensure immediate response times.
+
+  ### 4. Infrastructure as Code (IaC)
+  To ensure the project is truly scalable and repeatable across different regions, I would replace manual AWS console configuration with **Terraform** or **AWS CDK**. Managing infrastructure as code would allow me to version-control my resources and deploy the entire Cloud-Native model with a single command, eliminating human error during setup.
+  
 </details>
 <br>
 
